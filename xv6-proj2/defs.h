@@ -78,6 +78,7 @@ int             lapicid(void);
 extern volatile uint*    lapic;
 void            lapiceoi(void);
 void            lapicinit(void);
+void            lapicresched(int);
 void            lapicstartap(uchar, uint);
 void            microdelay(int);
 
@@ -111,6 +112,7 @@ int             kill(int);
 struct cpu*     mycpu(void);
 struct proc*    myproc();
 void            pinit(void);
+void            preempt_if_needed(void);
 void            procdump(void);
 void            scheduler(void) __attribute__((noreturn));
 void            sched(void);

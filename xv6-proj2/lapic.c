@@ -112,6 +112,21 @@ lapiceoi(void)
   if(lapic)
     lapicw(EOI, 0);
 }
+void
+lapicresched(int apicid)
+{
+  if(!lapic)
+    return;
+  
+  pushcli();
+  while(lapic[ICRLO] & DELIVS)
+   ;
+  lapicw(ICRHI, (uint)apicid << 24);
+  lapicw(ICRLO, FIXED |  ASSERT | T_RESCHED);
+  while(lapic[ICRLO] & DELIVS)
+   ;
+    popcli();
+}
 
 // Spin for a given number of microseconds.
 // On real hardware would want to tune this dynamically.

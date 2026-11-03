@@ -23,6 +23,7 @@ extern void forkret(void);
 extern void trapret(void);
 
 static void wakeup1(void *chan);
+static void request_reschedule_locked(void);
 //Return 1 if a should run before b.
 static int
 higher_priority(struct proc *a, struct proc *b)
@@ -52,6 +53,7 @@ rq_insert(struct proc *p)
 
   ptable.ready_queue[i] = p;
   ptable.ready_count++;
+  request_reschedule_locked();
 }
 
 static void
@@ -74,7 +76,7 @@ rq_remove(struct proc *p)
 }
 
 static int 
-should_perempt(struct proc *p)
+should_preempt_locked(struct proc *p)
 {
   struct proc *other;
   int i;
@@ -92,24 +94,41 @@ should_perempt(struct proc *p)
   }
 
   for(i=0; i < ptable.ready_count; i++){
-    if(!higher_priority(ptable.ready_queue[i], p)){
+    if(!higher_priority(ptable.ready_queue[i], p))
       break;
-    }
     better++;
 
 }
   return better >= ncpu;
+}
+static void
+request_reschedule_locked(void)
+{
+  int i;
+
+  for(i = 0; i < ncpu; i++){
+    if(should_preempt_locked(cpus[i].proc))
+      lapicresched(cpus[i].apicid);
+  }
 }
 
 static void
 reschedule_locked(void)
 {
   struct proc *p = myproc();
-  if(should_perempt(p)){
+  if(should_preempt_locked(p)){
     p->state = RUNNABLE;
     rq_insert(p);
     sched();
   }
+}
+
+void
+preempt_if_needed(void)
+{
+  acquire(&ptable.lock);
+  reschedule_locked();
+  release(&ptable.lock);
 }
 
 void
@@ -601,7 +620,7 @@ kill(int pid)
         p->state = RUNNABLE;
         rq_insert(p);
       }
-      reschedule_locked();
+      request_reschedule_locked();
       release(&ptable.lock);
       return 0;
     }
@@ -660,14 +679,16 @@ setnice(int pid, int nice)
   for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid==pid){
 
-      if(p->state == RUNNABLE){
+      if(p->state == RUNNABLE)
         rq_remove(p);
-      }
+      
       p->priority = nice;
 
-      if(p->state == RUNNABLE){
+      if(p->state == RUNNABLE)
         rq_insert(p);
-      }
+      else if (p->state == RUNNING)
+        request_reschedule_locked();
+      
       reschedule_locked();
       release(&ptable.lock);
       return 0;
