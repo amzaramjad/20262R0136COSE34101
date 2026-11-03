@@ -73,6 +73,45 @@ rq_remove(struct proc *p)
   ptable.ready_queue[ptable.ready_count] = 0;
 }
 
+static int 
+should_perempt(struct proc *p)
+{
+  struct proc *other;
+  int i;
+  int better = 0;
+
+  if(p == 0 || p->state != RUNNING){
+    return 0;
+  }
+  for(i =0; i < ncpu; i++){
+    other = cpus[i].proc;
+    if(other != 0 && other->state == RUNNING && 
+      higher_priority(other, p)){
+      better++;
+    }
+  }
+
+  for(i=0; i < ptable.ready_count; i++){
+    if(!higher_priority(ptable.ready_queue[i], p)){
+      break;
+    }
+    better++;
+
+}
+  return better >= ncpu;
+}
+
+static void
+reschedule_locked(void)
+{
+  struct proc *p = myproc();
+  if(should_perempt(p)){
+    p->state = RUNNABLE;
+    rq_insert(p);
+    sched();
+  }
+}
+
 void
 pinit(void)
 {
@@ -259,9 +298,11 @@ fork(void)
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
-  for(i = 0; i < NOFILE; i++)
-    if(curproc->ofile[i])
+  for(i = 0; i < NOFILE; i++){
+    if(curproc->ofile[i]){
       np->ofile[i] = filedup(curproc->ofile[i]);
+    }
+  }
   np->cwd = idup(curproc->cwd);
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
@@ -279,6 +320,8 @@ fork(void)
 
   np->state = RUNNABLE;
   rq_insert(np);
+
+  reschedule_locked();
 
   release(&ptable.lock);
 
@@ -558,6 +601,7 @@ kill(int pid)
         p->state = RUNNABLE;
         rq_insert(p);
       }
+      reschedule_locked();
       release(&ptable.lock);
       return 0;
     }
@@ -616,14 +660,15 @@ setnice(int pid, int nice)
   for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid==pid){
 
-      if(p->state == RUNNABLE)
+      if(p->state == RUNNABLE){
         rq_remove(p);
-      
+      }
       p->priority = nice;
 
-      if(p->state == RUNNABLE)
+      if(p->state == RUNNABLE){
         rq_insert(p);
-      
+      }
+      reschedule_locked();
       release(&ptable.lock);
       return 0;
     }
